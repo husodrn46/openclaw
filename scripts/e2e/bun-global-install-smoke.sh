@@ -1,4 +1,8 @@
 #!/usr/bin/env bash
+# Bash 5.3+ can deadlock writing heredoc pipes on macOS before the reader starts.
+if [[ ${OSTYPE:-} == darwin* && $BASH != /bin/bash ]] && ((BASH_VERSINFO[0] > 5 || (BASH_VERSINFO[0] == 5 && BASH_VERSINFO[1] >= 3))); then
+  exec /bin/bash "$0" "$@"
+fi
 set -Eeuo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
@@ -316,6 +320,7 @@ NODE
   )"
   package_root="$(dirname "$openclaw_entry")"
   export OPENCLAW_E2E_REDACTOR_MODULE="$package_root/dist/plugin-sdk/logging-core.js"
+  "$bun_path" scripts/docker/verify-fs-safe-native.mjs --package-root "$package_root" --mode require
 
   echo "==> Verify OpenClaw lifecycle scripts were trusted and executed"
   run_with_timeout "$COMMAND_TIMEOUT_MS" "$bun_path" pm -g untrusted >"$UNTRUSTED_LOG" 2>&1

@@ -10,6 +10,17 @@ import {
 } from "./registry.ts";
 import type { Locale, TranslationMap } from "./types.ts";
 
+function lookupTranslation(map: TranslationMap | undefined, keys: readonly string[]): unknown {
+  let value: unknown = map;
+  for (const key of keys) {
+    if (!value || typeof value !== "object") {
+      return undefined;
+    }
+    value = Reflect.get(value, key);
+  }
+  return value;
+}
+
 type Subscriber = (locale: Locale) => void;
 type LocaleLoadRecovery = {
   isUnrecoverableError: (error: unknown) => boolean;
@@ -234,44 +245,18 @@ class I18nManager {
   }
 
   public translateActive(key: string): string | undefined {
-    const keys = key.split(".");
-    let value: unknown = this.translations[this.locale];
-
-    for (const k of keys) {
-      if (value && typeof value === "object") {
-        value = Reflect.get(value, k);
-      } else {
-        return undefined;
-      }
-    }
-
+    const value = lookupTranslation(this.translations[this.locale], key.split("."));
     return typeof value === "string" ? value : undefined;
   }
 
   public t(key: string, params?: Record<string, string>): string {
     const keys = key.split(".");
-    let value: unknown = this.translations[this.locale] || this.translations[DEFAULT_LOCALE];
-
-    for (const k of keys) {
-      if (value && typeof value === "object") {
-        value = (value as Record<string, unknown>)[k];
-      } else {
-        value = undefined;
-        break;
-      }
-    }
-
-    // Fallback to English.
+    let value = lookupTranslation(
+      this.translations[this.locale] || this.translations[DEFAULT_LOCALE],
+      keys,
+    );
     if (value === undefined && this.locale !== DEFAULT_LOCALE) {
-      value = this.translations[DEFAULT_LOCALE];
-      for (const k of keys) {
-        if (value && typeof value === "object") {
-          value = (value as Record<string, unknown>)[k];
-        } else {
-          value = undefined;
-          break;
-        }
-      }
+      value = lookupTranslation(this.translations[DEFAULT_LOCALE], keys);
     }
 
     if (typeof value !== "string") {

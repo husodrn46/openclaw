@@ -73,7 +73,7 @@ export function pathKey(path: Array<string | number>): string {
 
 const wildcardHintCache = new WeakMap<ConfigUiHints, Array<[string[], ConfigUiHint]>>();
 
-export type ResolvedConfigUiHint = {
+type ResolvedConfigUiHint = {
   hint: ConfigUiHint;
   hintPath: string;
 };

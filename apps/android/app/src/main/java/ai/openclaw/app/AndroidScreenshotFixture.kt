@@ -5,6 +5,7 @@ import ai.openclaw.app.gateway.QuestionListResult
 import ai.openclaw.app.gateway.QuestionRecord
 import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonNull
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
@@ -56,6 +57,8 @@ internal object AndroidScreenshotFixture {
         "chat.history" -> chatHistory()
         "sessions.list" -> sessionList(paramsJson)
         "chat.metadata" -> chatMetadata()
+        "tasks.list" -> backgroundTasks(paramsJson)
+        "tasks.get" -> backgroundTask(paramsJson)
         "question.list" -> Json.encodeToString(QuestionListResult(listOf(pendingQuestion)))
         "cron.list" -> cronList()
         "cron.get" -> cronJob().toString()
@@ -64,6 +67,69 @@ internal object AndroidScreenshotFixture {
         else -> error("Screenshot fixture does not implement gateway method $method with params $paramsJson")
       }
     }
+  }
+
+  private fun taskRecords(): List<JsonObject> =
+    (1..16).map { index ->
+      buildJsonObject {
+        put("id", JsonPrimitive("screenshot-ledger-$index"))
+        put("taskId", JsonPrimitive("screenshot-runtime-$index"))
+        put("agentId", JsonPrimitive(if (index == 16) "other-agent" else "main"))
+        put("title", JsonPrimitive("Release task ${index.toString().padStart(2, '0')}"))
+        put("status", JsonPrimitive(if (index <= 8) "running" else "completed"))
+        put("runtime", JsonPrimitive("subagent"))
+        put("createdAt", JsonPrimitive(1_783_555_200_000L + index))
+        put("updatedAt", JsonPrimitive(1_783_555_260_000L + index))
+        put("progressSummary", JsonPrimitive("Reviewing the synthetic release checklist, item $index."))
+      }
+    }
+
+  private fun backgroundTasks(paramsJson: String?): String {
+    val params = Json.parseToJsonElement(checkNotNull(paramsJson)).jsonObject
+    val agentId = params["agentId"]?.jsonPrimitive?.contentOrNull
+    val statuses = (params["status"] as? JsonArray)?.map { it.jsonPrimitive.content }?.toSet()
+    val limit =
+      params["limit"]
+        ?.jsonPrimitive
+        ?.content
+        ?.toIntOrNull()
+        ?.coerceAtLeast(0) ?: 100
+    val tasks =
+      taskRecords()
+        .filter {
+          (agentId == null || it["agentId"]?.jsonPrimitive?.content == agentId) &&
+            (statuses == null || it["status"]?.jsonPrimitive?.content in statuses)
+        }.take(limit)
+    return buildJsonObject { put("tasks", JsonArray(tasks)) }.toString()
+  }
+
+  private fun backgroundTask(paramsJson: String?): String {
+    val id =
+      Json
+        .parseToJsonElement(checkNotNull(paramsJson))
+        .jsonObject["taskId"]
+        ?.jsonPrimitive
+        ?.content
+    val task =
+      taskRecords().firstOrNull { it["id"]?.jsonPrimitive?.content == id }
+        ?: error("Screenshot fixture has no task with canonical ledger ID $id")
+    val detail =
+      buildJsonObject {
+        task.forEach { (key, value) -> put(key, value) }
+        put(
+          "prompt",
+          JsonPrimitive(
+            (1..24).joinToString("\n\n") { "Checklist section $it: inspect the release notes and report the result without changing any files." },
+          ),
+        )
+        put(
+          "terminalSummary",
+          JsonPrimitive(
+            (1..24).joinToString("\n\n") { "Result section $it: the synthetic release checklist remains readable and selectable across layout changes." },
+          ),
+        )
+      }
+    return buildJsonObject { put("task", detail) }.toString()
   }
 
   val agents =
@@ -358,10 +424,26 @@ internal object AndroidScreenshotFixture {
           add(chatMessage("user", "Draft a short status update for the team.", 1_783_555_260_000))
           add(
             chatMessage(
-              "assistant",
-              "The Android release is close. Two review follow-ups and one localization pass remain; once those land, " +
-                "the changelog can be reviewed and the tag can go out.",
-              1_783_555_320_000,
+              role = "assistant",
+              content =
+                "The Android release is close. Two review follow-ups and one localization pass remain; once those land, " +
+                  "the changelog can be reviewed and the tag can go out.",
+              timestamp = 1_783_555_320_000,
+              provider = "openai",
+              model = "gpt-5.2",
+              usage =
+                buildJsonObject {
+                  put("input", JsonPrimitive(2_100))
+                  put("output", JsonPrimitive(160))
+                  put("cacheRead", JsonPrimitive(76_500))
+                },
+              cost =
+                buildJsonObject {
+                  put("input", JsonPrimitive(0.003))
+                  put("output", JsonPrimitive(0.004))
+                  put("cacheRead", JsonPrimitive(0.0015))
+                  put("total", JsonPrimitive(0.0085))
+                },
             ),
           )
         },
@@ -375,7 +457,12 @@ internal object AndroidScreenshotFixture {
           put("unread", JsonPrimitive(false))
           put("modelProvider", JsonPrimitive("openai"))
           put("model", JsonPrimitive("gpt-5.2"))
-          put("contextTokens", JsonPrimitive(200_000))
+          put("inputTokens", JsonPrimitive(18_420))
+          put("outputTokens", JsonPrimitive(840))
+          put("totalTokens", JsonPrimitive(109_800))
+          put("totalTokensFresh", JsonPrimitive(true))
+          put("contextTokens", JsonPrimitive(272_000))
+          put("estimatedCostUsd", JsonPrimitive(0.022956))
         },
       )
       put(
@@ -393,6 +480,10 @@ internal object AndroidScreenshotFixture {
     timestamp: Long,
     provenanceSourceTool: String? = null,
     marker: JsonObject? = null,
+    provider: String? = null,
+    model: String? = null,
+    usage: JsonObject? = null,
+    cost: JsonObject? = null,
   ) = buildJsonObject {
     put("role", JsonPrimitive(role))
     put("content", JsonPrimitive(content))
@@ -407,6 +498,10 @@ internal object AndroidScreenshotFixture {
       )
     }
     marker?.let { put("__openclaw", it) }
+    provider?.let { put("provider", JsonPrimitive(it)) }
+    model?.let { put("model", JsonPrimitive(it)) }
+    usage?.let { put("usage", it) }
+    cost?.let { put("cost", it) }
   }
 
   private fun sessionList(paramsJson: String?): String {
@@ -487,8 +582,12 @@ internal object AndroidScreenshotFixture {
     put("category", JsonNull)
     put("modelProvider", JsonPrimitive("openai"))
     put("model", JsonPrimitive("gpt-5.2"))
-    put("totalTokens", JsonPrimitive(18_420))
-    put("contextTokens", JsonPrimitive(200_000))
+    put("inputTokens", JsonPrimitive(18_420))
+    put("outputTokens", JsonPrimitive(840))
+    put("totalTokens", JsonPrimitive(109_800))
+    put("totalTokensFresh", JsonPrimitive(true))
+    put("contextTokens", JsonPrimitive(272_000))
+    put("estimatedCostUsd", JsonPrimitive(0.022956))
   }
 
   private fun chatMetadata(): String =

@@ -1,3 +1,4 @@
+import { randomUUID } from "node:crypto";
 import { existsSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
@@ -6,7 +7,7 @@ import type { Plugin } from "vite";
 import {
   loadControlUiTranslationMemory,
   materializeControlUiLocaleCatalog,
-} from "../../scripts/lib/control-ui-i18n-catalog.ts";
+} from "../../scripts/lib/control-ui-i18n-catalog-values.ts";
 import { CONTROL_UI_LOCALE_ENTRIES } from "../../scripts/lib/control-ui-i18n-config.ts";
 import { flattenTranslations } from "../../scripts/lib/control-ui-i18n-sync-plan.ts";
 import type { TranslationMap } from "../../scripts/lib/control-ui-i18n-sync-plan.ts";
@@ -21,9 +22,8 @@ const i18nAssetsDir = path.resolve(
 const locales = new Set(CONTROL_UI_LOCALE_ENTRIES.map(({ locale }) => locale));
 const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
 const sourceCatalogUrl = pathToFileURL(
-  path.join(repoRoot, "scripts/lib/control-ui-i18n-source-catalog.ts"),
+  path.join(repoRoot, "scripts/lib/control-ui-i18n-catalog.ts"),
 ).href;
-let sourceCatalogLoadId = 0;
 
 async function loadCurrentSourceCatalog(): Promise<{
   catalog: TranslationMap;
@@ -31,7 +31,7 @@ async function loadCurrentSourceCatalog(): Promise<{
 }> {
   const watchFiles = new Set<string>();
   const loader = register({
-    namespace: `openclaw-control-ui-source-catalog-${sourceCatalogLoadId++}`,
+    namespace: `openclaw-control-ui-source-catalog-${randomUUID()}`,
     onImport(url) {
       if (url.startsWith("file:")) {
         watchFiles.add(fileURLToPath(url));
@@ -43,7 +43,7 @@ async function loadCurrentSourceCatalog(): Promise<{
     const module = (await loader.import(
       sourceCatalogUrl,
       import.meta.url,
-    )) as typeof import("../../scripts/lib/control-ui-i18n-source-catalog.ts");
+    )) as typeof import("../../scripts/lib/control-ui-i18n-catalog.ts");
     return { catalog: module.loadControlUiSourceCatalog(), watchFiles };
   } finally {
     await loader.unregister();
@@ -73,12 +73,12 @@ export function controlUiLocaleModulesPlugin(): Plugin {
       for (const watchFile of watchFiles) {
         this.addWatchFile(watchFile);
       }
+      this.addWatchFile(memoryPath);
       // Source PRs omit generated memory until the post-merge refresh runs.
       // Existing empty or malformed memory stays fatal below so drift cannot hide.
       if (!existsSync(memoryPath)) {
         return `export default ${JSON.stringify(sourceCatalog)};`;
       }
-      this.addWatchFile(memoryPath);
       const memory = loadControlUiTranslationMemory(memoryPath);
       if (memory.size === 0) {
         throw new Error(`Control UI ${locale} translation memory is missing or empty`);
